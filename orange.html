@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>webgis(徐嘉波)</title>
+	<!-- 1 、引用ol依赖 和jquery-->
+	<link rel="stylesheet" href="lib/ol.css">
+	<script src="lib/ol.js"></script>
+	<script type="text/javascript" src="./lib/jquery.min.js"></script> 	
+	<style>
+		/* 5、调整控件布局，避免重叠 */
+		#map{
+			width: 68%;
+			height: 100%;
+			position: absolute;
+		}
+		#map .ol-zoom {
+			margin-top: 30px;
+		}
+		.ol-rotate{
+			right:40px;
+		}
+		.ol-scale-line {
+			left: 150px;
+			bottom: 0px;
+		}
+		.ol-overviewmap{
+			bottom: 20px;
+		}
+		.all{ /*  所有盒子往右靠 */
+			float: right;
+		}
+		#info{
+			margin-top: 20px;
+			width: 450px;
+			height: 100px;
+		}
+		#display{
+			width: 450px;
+			height: auto;
+		};
+		datalist {
+  			display: flex;
+  			flex-direction: column;
+  			justify-content: space-between;
+			writing-mode: vertical-lr;
+  			width: 300px;
+		}
+		option {
+ 			 padding: 0;
+		}
+		input[type="range"] {
+ 			 width: 300px;
+  			margin: 0;
+		}
+		#datas{
+			width: 400px;
+			margin-top: 20px;
+		}
+		table,
+    	table td,
+    	table th {
+        border: 1px solid #000000;
+   		 }	
+	</style>
+</head>
+<body>
+	<!-- 2、设置地图挂载点 -->
+	<div id="map"></div>
+	<!-- <div id="mouse-position" class="mouse-position-wrapper">
+		<div class="custom-mouse-position"></div>
+	</div> -->
+	<div class ="all">
+		<div id="info">&nbsp;</div>
+		<div id="display">
+			<p id="show">输入产量:(1000-4000公顷/亩)</p>
+			<input type="range" id="yield" value="2000" min="1000" max="4000" step="1" onchange="compute(Data);">
+			<datalist id="tickmarks"> <!--表示刻度-->>
+				<option value="1000" label="1000"></option>
+				<option value="2000" label="2000"></option>
+				<option value="3000" label="3000"></option>
+				<option value="4000" label="4000"></option>
+			</datalist>
+			<table class="layui-table" id="datas">
+				<tr>
+					<th>果园施肥</th>
+					<th>N肥</th>
+					<th>P肥</th>
+					<th>K肥</th>
+				</tr>
+				<tr id="template">
+					<td id="l0"></td>
+					<td id="l1"></td>
+					<td id="l2"></td>
+					<td id="l3"></td>
+				</tr>
+			</table>
+		</div>
+	</div>
+	
+	<script>
+		var map; //声明地图，后面赋值创建
+		const wmsUrl ="http://localhost:8080/geoserver/Orange/wms"
+		// 都是参数
+		var wmsLayer = new Array("Orange:orangeGarden",  "Orange:orangeSoil"); //(工作空间名：图层名)需要改,且：后面不能有空格
+		var wmsFormat ='image/png';//ImageWMS加载进来是图片格式，tile是瓦片
+		var extend = [419385.50607151876, 2981157.238951452, 472611.82017151685, 3026504.4436514536];//平面坐标范围,图层里找
+		var bound =[116.18585560990299,26.93871937036713,116.72476870808093,27.350030995215665] //地理坐标范围
+		var orSource = new ol.source.ImageWMS({
+					ratio: 1, //不能设置为0，否则地图不展示
+        			url: wmsUrl, //请求url，通过图层openlayer预览地址栏找到，其实就是http://localhost:8080/geoserver/工作空间名称/wms
+        			params: {//参数
+						FORMAT: wmsFormat,
+                   		VERSION: '1.1.0',  //乱改发现随便填不影响，建议不动(1.1.1/1.1.0)
+                		LAYERS: wmsLayer[0], //OrangeWMS:orangeGarden
+						exceptions: 'application/vnd.ogc.se_inimage'
+               		},
+					serverType: 'geoserver'
+           		});
+		var soSource = new ol.source.ImageWMS({
+				ratio: 1,
+				url: wmsUrl,
+				params: {
+					FORMAT: wmsFormat,
+					VERSION: '1.1.0',
+					// STYLES: '',
+					LAYERS: wmsLayer[1],
+					exceptions: 'application/vnd.ogc.se_inimage'
+				},
+				serverType: 'geoserver'
+			});
+		// 定义显示
+		const view =  new ol.View({
+					center: ol.proj.transform([116.455312159, 27.144375183], "EPSG:4326", "EPSG:3857"),//把中心经纬度转换成平面坐标，EPSG:4326(地理坐标）3857(投影坐标）
+					minZoom:9,
+					maxZoom:13,
+					zoom: 11
+				});
+		// 3、初始化地图方法
+		var initMap = function (){
+			// 4、创建地图图层
+			var orangeLayer = new ol.layer.Image({
+				source:orSource
+			});
+			var soilLayer = new ol.layer.Image({
+				source: soSource
+			});
+			// 5、实例化map(之前已经声明)
+			map = new ol.Map({
+				// 加入一些地图控件
+				controls: ol.control.defaults().extend([ //在基础控件之外，加上一些内置的控件
+					new ol.control.FullScreen(),//全屏
+					new ol.control.MousePosition({ //坐标拾取控件来动态显示地图上鼠标光标的坐标
+						coordinateFormat: ol.coordinate.createStringXY(4),      // 将坐标保留4位小数位，并转换为字符串
+						projection: 'EPSG:4326',                                // 以经纬度显示
+						className: 'custom-mouse-position',                     // 控件的CSS类名
+						target: document.getElementById('mouse-position'),      // 将控件渲染在该DOM元素中
+						undefinedHTML: '&nbsp;'                                 // 鼠标离开地图时，显示空格
+					}),
+					new ol.control.ScaleLine(), //比例尺控件
+					new ol.control.OverviewMap({}), //鸟瞰图控件
+					new ol.control.Rotate({autoHide: false}), //地图旋转控件
+					// new ol.control.ZoomSlider({}), //缩放滚动条控件
+					// new ol.control.ZoomToExtent({}) //视图跳转控件
+				]),
+				target: "map",//放进地图容器
+				layers: [orangeLayer, soilLayer], //图层(可多个叠加)，将上面的wms图层放进来
+				view:view
+			});	
+		}
+		initMap();//调用初始化地图方法
+		var Data = new Array();
+		//6.map单击事件响应函数。异步读取getfeatureinfo url获取数据
+		map.on('singleclick', function (evt) {
+			document.getElementById('info').innerHTML = ''; //初始化
+			const viewResolution = /** @type {number} */ (view.getResolution());
+			const url = soSource.getFeatureInfoUrl(
+				evt.coordinate,
+				viewResolution,
+				'EPSG:3857',
+				{ 'INFO_FORMAT': 'text/html' }
+			);
+			if (url) {//判断有无
+				fetch(url)//请求加载url中信息，响应数据
+					.then((response) => response.text()) //返回字符串
+					.then((html) => {
+						document.getElementById('info').innerHTML = html;
+						//7.提取信息:使用 DOMParser解析HTML
+						Data =[];
+						let parser = new DOMParser();
+						let htmlDoc = parser.parseFromString(html, 'text/html');//调用 parseFromString 方法并输入和输出文档类型（创建一个虚拟 DOM）
+						for (let index = 0; index < 4; index++) {
+							Data.push(parseFloat(htmlDoc.getElementsByTagName('td')[index + 5].innerText)) //数组添加转换为浮点类型的数据		
+						}
+						// console.log(Data) //N 有机质 K P
+					});
+				}
+			});
+		//8. 计算
+		function compute(data){	
+			var yield = document.getElementById('yield').value;
+			document.getElementById('show').innerHTML = "输入产量: "+ "<b>"+yield+"</b>"+" 公斤/亩";
+			//养分调整系数
+			var ratioN;
+			var ratioP; 
+			var ratioK;
+			//总量
+			var fertN;
+			var fertP;
+			var fertK;
+			//春期施肥
+			var spN;
+			var spP;
+			var spK;
+			//壮果肥
+			var fN;
+			var fP;
+			var fK;
+			//冬肥
+			var wnN;
+			var wnP;
+			var wnK;
+			//根据N，P，K判断格子养分调整系数
+			if (data[0]<30) {
+				ratioN = 1.24;
+			} else if(data[0]<55){
+				ratioN = 1.16;
+			} else if (data[0] < 85) {
+				ratioN = 1.08;
+			} else if (data[0] < 120) {
+				ratioN = 1;
+			} else if (data[0] < 150) {
+				ratioN = 0.92;
+			} else{
+				ratioN = 0.84;
+			};
+			if (data[3] < 2) {
+				ratioP = 1.24;
+			} else if (data[3] < 4.5) {
+				ratioP = 1.16;
+			} else if (data[3] < 10) {
+				ratioP = 1.08;
+			} else if (data[3] < 20) {
+				ratioP = 1;
+			} else if (data[3] < 40) {
+				ratioP = 0.92; 
+			} else {
+				ratioP = 0.84;
+			};
+			if (data[2] < 30) {
+				ratioK = 1.24;
+			} else if (data[2] < 50) {
+				ratioK = 1.16;
+			} else if (data[2] < 90) {
+				ratioK = 1.08;
+			} else if (data[2] < 140) {
+				ratioK = 1;
+			} else if (data[2] < 200) {
+				ratioK = 0.92;
+			} else {
+				ratioK = 0.84;
+			};
+			//根据产量水平计算施肥总量
+			if (yield <1000 || yield > 4000){
+				alert("意外错误")
+			}else if(yield <= 2000){
+				fertN = yield * 0.9 * ratioN / 100;
+				fertP = yield * 0.81 * ratioP / 100;
+				fertK = yield * 0.81 * ratioK / 100;
+			} else {
+				fertN = yield * 0.95 * ratioN / 100;
+				fertP = yield * 0.85 * ratioP / 100;
+				fertK = yield * 0.85 * ratioK / 100;
+			};
+			//计算春期施肥、壮果肥和冬肥的分量
+			spN =fertN * 0.3;
+			fN = wnN = fertN * 0.4;
+			spP = fertP * 0.3;
+			fP = wnP = fertP * 0.4;
+			spK = fertK * 0.3;
+			fK = wnK = fertK * 0.4;
+			//数据汇总
+			console.log(fertK);
+			var sumdata = [{
+				l0:'总量',
+				l1: fertN,
+				l2: fertP,
+				l3: fertK,
+			}, 
+			{
+				l0: '春期施肥',
+				l1: spN,
+				l2: spP,
+				l3: spK,
+			},
+			{
+				l0: '壮果肥',
+				l1: fN,
+				l2: fP,
+				l3: fK,
+			},
+			{
+				l0: '冬肥',
+				l1: wnN,
+				l2: wnP,
+				l3: wnK,
+			}];
+			//判断行数，删除上次的结果（最后四行）
+			let ta = document.getElementById("datas");
+			let rows = ta.rows.length;
+			if (rows > 3) {
+				for (let index = 0; index < 4; index++) {
+					$("table tr:last").remove()				
+				}			
+			}	 		
+			//数据丢进表格（jquery）
+			$.each(sumdata, function (i, n) { //通用的遍历方法
+				var row = $("#template").clone();
+				row.find("#l0").text(n.l0);
+				row.find("#l1").text(n.l1.toFixed(2)); //四舍五入保留2位小数
+				row.find("#l2").text(n.l2.toFixed(2));
+				row.find("#l3").text(n.l3.toFixed(2));
+				row.appendTo("#datas");
+			});	
+		}
+
+	</script>
+</body>	    
+
+</html>
